@@ -387,7 +387,7 @@ class Problem:
         input_collection = [cells_sol_flat, self.cells_sol_flat_0, self.physical_quad_points, self.shape_grads, self.JxW, self.v_grads_JxW, *internal_vars]
 
 
-
+#
         if jac_flag:
             values = []
             jacs = []
