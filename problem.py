@@ -317,6 +317,11 @@ class Problem:
 
 
             def kernel_jac(cell_sol_flat, *args):
+                # kernel_partial = lambda cell_sol_flat: kernel(cell_sol_flat, *args)
+                # if hasattr(self, 'X_0'):
+                #     kernel_partial = lambda cell_sol_flat, cell_sol_flat_0: kernel(cell_sol_flat, cell_sol_flat_0, *args)
+                # else:
+                #     kernel_partial = lambda cell_sol_flat: kernel(cell_sol_flat, *args)
                 kernel_partial = lambda cell_sol_flat: kernel(cell_sol_flat, *args)
                 return value_and_jacfwd(kernel_partial, cell_sol_flat)  # kernel(cell_sol_flat, *args), jax.jacfwd(kernel)(cell_sol_flat, *args)
 

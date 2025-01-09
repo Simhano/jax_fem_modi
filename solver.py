@@ -653,6 +653,7 @@ def dynamic_relax_solve(problem, tol=1e-6, nKMat=50, nPrint=500, info=True, info
 
     sol_list = problem.unflatten_fn_sol_list(dofs)
 
+        
     return sol_list[0]
 
 
@@ -751,6 +752,8 @@ def ad_wrapper(problem, solver_options={}, adjoint_solver_options={}):
     def fwd_pred(params):
         problem.set_params(params)
         sol_list = solver(problem, solver_options)
+        if hasattr(problem, 'X_0'):
+            problem.U_grad_0_last
         return sol_list
 
     def f_fwd(params):
