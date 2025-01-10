@@ -200,12 +200,10 @@ class Problem:
             ####################
             # (1, num_nodes, vec, 1) * (num_quads, num_nodes, 1, dim) -> (num_quads, num_nodes, vec, dim)
             u_grads = cell_sol[None, :, :, None] * cell_shape_grads[:, :, None, :]
-                    #####################
-            #print("u_grads_reshape.shape:")
-            #print(u_grads_reshape.shape)
             
-            ####################
+
             u_grads = np.sum(u_grads, axis=1)  # (num_quads, vec, dim)
+            
             u_grads_reshape = u_grads.reshape(-1, vec, self.dim)  # (num_quads, vec, dim)
             
 
@@ -213,11 +211,18 @@ class Problem:
             if hasattr(self, 'X_0'):
                 # print(self.cells_sol_flat_0.shape)
                 # print(cell_sol_flat.shape)
+                
+                
                 cell_sol_list_0 = self.unflatten_fn_dof(cells_sol_flat_0)
                 cell_sol_0 = cell_sol_list_0[0]
                 u_grads_0 = cell_sol_0[None, :, :, None] * cell_shape_grads[:, :, None, :]
+                
                 u_grads_0 = np.sum(u_grads_0, axis=1)  # (num_quads, vec, dim)
+                
                 u_grads_reshape_0 = u_grads_0.reshape(-1, vec, self.dim)  # (num_quads, vec, dim)
+
+                
+
                 # print(u_grads_reshape)
                 # print(u_grads_reshape_0)
                 u_physics = jax.vmap(tensor_map)(u_grads_reshape, u_grads_reshape_0, *cell_internal_vars).reshape(u_grads.shape)
@@ -230,7 +235,6 @@ class Problem:
             val = np.sum(u_physics[:, None, :, :] * cell_v_grads_JxW, axis=(0, -1))
             val = jax.flatten_util.ravel_pytree(val)[0] # (num_nodes*vec + ...,)
             return val
-
         return laplace_kernel
 
     def get_mass_kernel(self, mass_map):
@@ -480,18 +484,24 @@ class Problem:
         # print(self.cells_list)
         # print(sol_list)
         cells_sol_flat = jax.vmap(lambda *x: jax.flatten_util.ravel_pytree(x)[0])(*cells_sol_list) # (num_cells, num_nodes*vec + ...)
-
-
+        
+        # def update_params(mesh, params):
+        #     # Compute updated values without directly modifying the object
+        #     X_0 = mesh.points + params
+        #     return X_0
+        
         if hasattr(self, 'X_0'):
         # It will always now be bound to a value at this point.
+            jax.debug.print("params: {}", self.params)
+            # self.X_0 = update_params(self.mesh[0], self.params)
             self.sol_list_0 = [self.X_0 - self.mesh[0].points]
             self.cells_sol_list_0 = [sol[cells] for cells, sol in zip(self.cells_list, self.sol_list_0)] # [(num_cells, num_nodes, vec), ...]
             self.cells_sol_flat_0 = jax.vmap(lambda *x: jax.flatten_util.ravel_pytree(x)[0])(*self.cells_sol_list_0) # (num_cells, num_nodes*vec + ...)
-            print("if hasattr(self, 'X_0'):hh")
-            print(np.array(self.sol_list_0))
-            print(sol_list)
-            print(self.cells_sol_flat_0.shape)
-            print(cells_sol_flat.shape)
+            # print("if hasattr(self, 'X_0'):hh")
+            # print(np.array(self.sol_list_0))
+            # print(sol_list)
+            # print(self.cells_sol_flat_0.shape)
+            # print(cells_sol_flat.shape)
         else:
             self.cells_sol_flat_0 = cells_sol_flat
 

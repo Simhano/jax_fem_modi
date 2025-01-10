@@ -752,8 +752,6 @@ def ad_wrapper(problem, solver_options={}, adjoint_solver_options={}):
     def fwd_pred(params):
         problem.set_params(params)
         sol_list = solver(problem, solver_options)
-        if hasattr(problem, 'X_0'):
-            problem.U_grad_0_last
         return sol_list
 
     def f_fwd(params):
