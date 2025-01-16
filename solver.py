@@ -37,7 +37,7 @@ def jax_solve(problem, A_fn, b, x0, precond):
     # Verify convergence
     err = np.linalg.norm(A_fn(x) - b)
     logger.debug(f"JAX Solver - Finshed solving, res = {err}")
-    assert err < 0.1, f"JAX linear solver failed to converge with err = {err}"
+    assert err < 0.1, f"JAX linear solver failed to converge with err = {err}" # 0.1
     x = np.where(err < 0.1, x, np.nan) # For assert purpose, some how this also affects bicgstab.
 
     return x
@@ -329,12 +329,24 @@ def line_search(problem, dofs, inc):
 def get_A_fn(problem, solver_options):
     logger.debug(f"Creating sparse matrix with scipy...")
     A_sp_scipy = scipy.sparse.csr_array(
+        # (onp.array(problem.V), (problem.I, problem.J)),
         (onp.array(problem.V), (problem.I, problem.J)),
         shape=(problem.num_total_dofs_all_vars, problem.num_total_dofs_all_vars))
     # logger.debug(f"Creating sparse matrix from scipy using JAX BCOO...")
     A_sp = BCOO.from_scipy_sparse(A_sp_scipy).sort_indices()
     # logger.info(f"Global sparse matrix takes about {A_sp.data.shape[0]*8*3/2**30} G memory to store.")
     problem.A_sp_scipy = A_sp_scipy
+###################################################################################
+    # Create JAX-compatible sparse matrix using BCOO
+    # A_sp = BCOO(
+    #     (problem.V, np.stack([problem.I, problem.J], axis=0)),  # Data and coordinates
+    #     shape=(problem.num_total_dofs_all_vars, problem.num_total_dofs_all_vars)
+    # ).sort_indices()
+
+    # # Store the JAX sparse matrix
+    # problem.A_sp = A_sp
+
+
 
     def compute_linearized_residual(dofs):
         return A_sp @ dofs

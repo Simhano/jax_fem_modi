@@ -221,8 +221,6 @@ class Problem:
                 
                 u_grads_reshape_0 = u_grads_0.reshape(-1, vec, self.dim)  # (num_quads, vec, dim)
 
-                
-
                 # print(u_grads_reshape)
                 # print(u_grads_reshape_0)
                 u_physics = jax.vmap(tensor_map)(u_grads_reshape, u_grads_reshape_0, *cell_internal_vars).reshape(u_grads.shape)
@@ -409,8 +407,12 @@ class Problem:
                 val, jac = vmap_fn(*input_col)
                 values.append(val)
                 jacs.append(jac)
+
             values = np_version.vstack(values)
             jacs = np_version.vstack(jacs)
+
+            # values = np.vstack(values)
+            # jacs = np.vstack(jacs)
 
             return values, jacs
         else:
@@ -480,6 +482,8 @@ class Problem:
 
     def compute_newton_vars(self, sol_list, internal_vars, internal_vars_surfaces):
         logger.debug(f"Computing cell Jacobian and cell residual...")
+
+        # jax.debug.print("Sol_list: {}", sol_list)
         cells_sol_list = [sol[cells] for cells, sol in zip(self.cells_list, sol_list)] # [(num_cells, num_nodes, vec), ...]
         # print(self.cells_list)
         # print(sol_list)
@@ -489,7 +493,7 @@ class Problem:
         #     # Compute updated values without directly modifying the object
         #     X_0 = mesh.points + params
         #     return X_0
-        
+#############################################################################      
         if hasattr(self, 'X_0'):
         # It will always now be bound to a value at this point.
             jax.debug.print("params: {}", self.params)
@@ -504,15 +508,17 @@ class Problem:
             # print(cells_sol_flat.shape)
         else:
             self.cells_sol_flat_0 = cells_sol_flat
-
+########################################################################
         # (num_cells, num_nodes*vec + ...),  (num_cells, num_nodes*vec + ..., num_nodes*vec + ...)
         weak_form_flat, cells_jac_flat = self.split_and_compute_cell(cells_sol_flat, onp, True, internal_vars)
         self.V = onp.array(cells_jac_flat.reshape(-1))
+        # self.V = np.array(cells_jac_flat.reshape(-1))
 
         # [(num_selected_faces, num_nodes*vec + ...,), ...], [(num_selected_faces, num_nodes*vec + ..., num_nodes*vec + ...,), ...]
         weak_form_face_flat, cells_jac_face_flat = self.compute_face(cells_sol_flat, onp, True, internal_vars_surfaces)
         for cells_jac_f_flat in cells_jac_face_flat:
             self.V = onp.hstack((self.V, onp.array(cells_jac_f_flat.reshape(-1))))
+            # self.V = np.hstack((self.V, np.array(cells_jac_f_flat.reshape(-1))))
 
         return self.compute_residual_vars_helper(weak_form_flat, weak_form_face_flat)
 
