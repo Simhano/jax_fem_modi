@@ -383,7 +383,7 @@ class Problem:
             self.kernel_jac_face.append(kernel_jac_face)
 
     @timeit
-    def split_and_compute_cell(self, cells_sol_flat, np_version, jac_flag, internal_vars):
+    def split_and_compute_cell(self, cells_sol_flat, np_version, jac_flag, internal_vars, cells_sol_flat_0):
         """Volume integral in weak form
         """ 
         vmap_fn = self.kernel_jac if jac_flag else self.kernel
@@ -391,7 +391,7 @@ class Problem:
         if num_cuts > self.num_cells:
             num_cuts = self.num_cells
         batch_size = self.num_cells // num_cuts
-        input_collection = [cells_sol_flat, self.cells_sol_flat_0, self.physical_quad_points, self.shape_grads, self.JxW, self.v_grads_JxW, *internal_vars]
+        input_collection = [cells_sol_flat, cells_sol_flat_0, self.physical_quad_points, self.shape_grads, self.JxW, self.v_grads_JxW, *internal_vars]
 
 
 #
@@ -474,8 +474,26 @@ class Problem:
         logger.debug(f"Computing cell residual...")
         cells_sol_list = [sol[cells] for cells, sol in zip(self.cells_list, sol_list)] # [(num_cells, num_nodes, vec), ...]
         cells_sol_flat = jax.vmap(lambda *x: jax.flatten_util.ravel_pytree(x)[0])(*cells_sol_list) # (num_cells, num_nodes*vec + ...)
-            
-        weak_form_flat = self.split_and_compute_cell(cells_sol_flat, np, False, internal_vars)  # (num_cells, num_nodes*vec + ...)
+
+
+#############################################################################      
+        if hasattr(self, 'X_0'):
+        # It will always now be bound to a value at this point.
+            jax.debug.print("params: {}", self.params)
+            # self.X_0 = update_params(self.mesh[0], self.params)
+            sol_list_0 = [self.X_0 - self.mesh[0].points]
+            cells_sol_list_0 = [sol[cells] for cells, sol in zip(self.cells_list, sol_list_0)] # [(num_cells, num_nodes, vec), ...]
+            cells_sol_flat_0 = jax.vmap(lambda *x: jax.flatten_util.ravel_pytree(x)[0])(*cells_sol_list_0) # (num_cells, num_nodes*vec + ...)
+            # print("if hasattr(self, 'X_0'):hh")
+            # print(np.array(self.sol_list_0))
+            # print(sol_list)
+            # print(self.cells_sol_flat_0.shape)
+            # print(cells_sol_flat.shape)
+        else:
+            cells_sol_flat_0 = cells_sol_flat
+########################################################################
+
+        weak_form_flat = self.split_and_compute_cell(cells_sol_flat, np, False, internal_vars, cells_sol_flat_0)  # (num_cells, num_nodes*vec + ...)
         
         weak_form_face_flat = self.compute_face(cells_sol_flat, np, False, internal_vars_surfaces)  # [(num_selected_faces, num_nodes*vec + ...), ...]
         return self.compute_residual_vars_helper(weak_form_flat, weak_form_face_flat)
@@ -498,19 +516,19 @@ class Problem:
         # It will always now be bound to a value at this point.
             jax.debug.print("params: {}", self.params)
             # self.X_0 = update_params(self.mesh[0], self.params)
-            self.sol_list_0 = [self.X_0 - self.mesh[0].points]
-            self.cells_sol_list_0 = [sol[cells] for cells, sol in zip(self.cells_list, self.sol_list_0)] # [(num_cells, num_nodes, vec), ...]
-            self.cells_sol_flat_0 = jax.vmap(lambda *x: jax.flatten_util.ravel_pytree(x)[0])(*self.cells_sol_list_0) # (num_cells, num_nodes*vec + ...)
+            sol_list_0 = [self.X_0 - self.mesh[0].points]
+            cells_sol_list_0 = [sol[cells] for cells, sol in zip(self.cells_list, sol_list_0)] # [(num_cells, num_nodes, vec), ...]
+            cells_sol_flat_0 = jax.vmap(lambda *x: jax.flatten_util.ravel_pytree(x)[0])(*cells_sol_list_0) # (num_cells, num_nodes*vec + ...)
             # print("if hasattr(self, 'X_0'):hh")
             # print(np.array(self.sol_list_0))
             # print(sol_list)
             # print(self.cells_sol_flat_0.shape)
             # print(cells_sol_flat.shape)
         else:
-            self.cells_sol_flat_0 = cells_sol_flat
+            cells_sol_flat_0 = cells_sol_flat
 ########################################################################
         # (num_cells, num_nodes*vec + ...),  (num_cells, num_nodes*vec + ..., num_nodes*vec + ...)
-        weak_form_flat, cells_jac_flat = self.split_and_compute_cell(cells_sol_flat, onp, True, internal_vars)
+        weak_form_flat, cells_jac_flat = self.split_and_compute_cell(cells_sol_flat, onp, True, internal_vars, cells_sol_flat_0)
         self.V = onp.array(cells_jac_flat.reshape(-1))
         # self.V = np.array(cells_jac_flat.reshape(-1))
 
