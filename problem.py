@@ -479,7 +479,7 @@ class Problem:
 #############################################################################      
         if hasattr(self, 'X_0'):
         # It will always now be bound to a value at this point.
-            jax.debug.print("params: {}", self.params)
+            # jax.debug.print("params: {}", self.params)
             # self.X_0 = update_params(self.mesh[0], self.params)
             sol_list_0 = [self.X_0 - self.mesh[0].points]
             cells_sol_list_0 = [sol[cells] for cells, sol in zip(self.cells_list, sol_list_0)] # [(num_cells, num_nodes, vec), ...]
@@ -514,7 +514,7 @@ class Problem:
 #############################################################################      
         if hasattr(self, 'X_0'):
         # It will always now be bound to a value at this point.
-            jax.debug.print("params: {}", self.params)
+            # jax.debug.print("params: {}", self.params)
             # self.X_0 = update_params(self.mesh[0], self.params)
             sol_list_0 = [self.X_0 - self.mesh[0].points]
             cells_sol_list_0 = [sol[cells] for cells, sol in zip(self.cells_list, sol_list_0)] # [(num_cells, num_nodes, vec), ...]

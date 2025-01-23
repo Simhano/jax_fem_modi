@@ -6,6 +6,7 @@ from jax.experimental.sparse import BCOO
 import scipy
 import time
 from petsc4py import PETSc
+import gc
 
 from jax_fem import logger
 
@@ -80,7 +81,15 @@ def petsc_solve(A, b, ksp_type, pc_type):
     logger.debug(f"PETSc Solver - Finished solving, linear solve res = {err}")
     assert err < 0.1, f"PETSc linear solver failed to converge, err = {err}"
 
-    return x.getArray()
+    # Delete PETSc objects
+    ksp.destroy()
+    rhs.destroy()
+    y.destroy()
+    A.destroy()
+    result = x.getArray()
+    x.destroy()
+    gc.collect()
+    return result
 
 
 ################################################################################
@@ -336,17 +345,6 @@ def get_A_fn(problem, solver_options):
     A_sp = BCOO.from_scipy_sparse(A_sp_scipy).sort_indices()
     # logger.info(f"Global sparse matrix takes about {A_sp.data.shape[0]*8*3/2**30} G memory to store.")
     problem.A_sp_scipy = A_sp_scipy
-###################################################################################
-    # Create JAX-compatible sparse matrix using BCOO
-    # A_sp = BCOO(
-    #     (problem.V, np.stack([problem.I, problem.J], axis=0)),  # Data and coordinates
-    #     shape=(problem.num_total_dofs_all_vars, problem.num_total_dofs_all_vars)
-    # ).sort_indices()
-
-    # # Store the JAX sparse matrix
-    # problem.A_sp = A_sp
-
-
 
     def compute_linearized_residual(dofs):
         return A_sp @ dofs
@@ -355,6 +353,8 @@ def get_A_fn(problem, solver_options):
 
     if jax_type:
         A = row_elimination(compute_linearized_residual, problem)
+
+  
     else:
         # https://scicomp.stackexchange.com/questions/2355/32bit-64bit-issue-when-working-with-numpy-and-petsc4py/2356#2356
         A = PETSc.Mat().createAIJ(size=A_sp_scipy.shape, csr=(A_sp_scipy.indptr.astype(PETSc.IntType, copy=False),
@@ -363,7 +363,7 @@ def get_A_fn(problem, solver_options):
         for ind, fe in enumerate(problem.fes):
             for i in range(len(fe.node_inds_list)):
                 row_inds = onp.array(fe.node_inds_list[i] * fe.vec + fe.vec_inds_list[i] + problem.offset[ind], dtype=onp.int32)
-                A.zeroRows(row_inds)        
+                A.zeroRows(row_inds)
 
     return A
 
@@ -483,6 +483,15 @@ def solver(problem, solver_options={}):
     logger.debug(f"max of dofs = {np.max(dofs)}")
     logger.debug(f"min of dofs = {np.min(dofs)}")
 
+
+    if "petsc_solver" in solver_options:
+        A_fn.destroy()
+    else:
+        del A_fn
+
+    del dofs
+    del res_vec
+    gc.collect()
     return sol_list
 
 
