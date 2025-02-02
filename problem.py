@@ -34,13 +34,30 @@ class Problem:
 
         self.num_vars = len(self.mesh)
 
-        self.fes = [FiniteElement(mesh=self.mesh[i], 
-                                  vec=self.vec[i], 
-                                  dim=self.dim, 
-                                  ele_type=self.ele_type[i], 
-                                  gauss_order=self.gauss_order[i] if type(self.gauss_order) == type([]) else self.gauss_order,
-                                  dirichlet_bc_info=self.dirichlet_bc_info[i] if type(self.dirichlet_bc_info) == type([]) else self.dirichlet_bc_info) \
-                    for i in range(self.num_vars)] 
+        if hasattr(self, 'X_0') and self.param_flag > 3:
+            for i, fe in enumerate(self.fes):
+                fe.points = self.mesh[i].points  # Update points
+                fe.shape_grads, fe.JxW = fe.get_shape_grads()  # Update gradients and Jacobians
+                fe.v_grads_JxW = fe.shape_grads[:, :, :, None, :] * fe.JxW[:, :, None, None, None]
+
+            jax.debug.print("Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE")
+            jax.debug.print("Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE")
+            jax.debug.print("Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE")
+            jax.debug.print("Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE")
+            jax.debug.print("Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE")
+            jax.debug.print("Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE Bypas FE")
+
+            
+        else:
+            self.fes = [FiniteElement(mesh=self.mesh[i], 
+                                    vec=self.vec[i], 
+                                    dim=self.dim, 
+                                    ele_type=self.ele_type[i], 
+                                    gauss_order=self.gauss_order[i] if type(self.gauss_order) == type([]) else self.gauss_order,
+                                    dirichlet_bc_info=self.dirichlet_bc_info[i] if type(self.dirichlet_bc_info) == type([]) else self.dirichlet_bc_info) \
+                        for i in range(self.num_vars)] 
+
+
 
         self.cells_list = [fe.cells for fe in self.fes]
         # Assume all fes have the same number of cells, same dimension
@@ -89,6 +106,8 @@ class Problem:
 
         self.num_nodes_cumsum = onp.cumsum([0] + [fe.num_nodes for fe in self.fes])
         # (num_cells, num_vars, num_quads)
+
+
         self.JxW = onp.transpose(onp.stack([fe.JxW for fe in self.fes]), axes=(1, 0, 2)) 
         # (num_cells, num_quads, num_nodes +..., dim)
         self.shape_grads = onp.concatenate([fe.shape_grads for fe in self.fes], axis=2)
@@ -98,6 +117,8 @@ class Problem:
         # TODO: assert all vars quad points be the same
         # (num_cells, num_quads, dim)
         self.physical_quad_points = self.fes[0].get_physical_quad_points()  
+
+
 
         self.selected_face_shape_grads = []
         self.nanson_scale = []
@@ -132,7 +153,12 @@ class Problem:
 
         self.internal_vars = ()
         self.internal_vars_surfaces = [() for _ in range(len(self.boundary_inds_list))]
-        self.custom_init(*self.additional_info)
+        if hasattr(self, 'X_0') and hasattr(self, 'param_flag'):
+            if self.param_flag < 1:
+                self.custom_init(*self.additional_info)
+        else:
+            self.custom_init(*self.additional_info)
+
         self.pre_jit_fns()
 ##########################################################################################################################
     def assemble_system(self):
@@ -211,7 +237,7 @@ class Problem:
             if hasattr(self, 'X_0'):
                 # print(self.cells_sol_flat_0.shape)
                 # print(cell_sol_flat.shape)
-                
+                F_S = u_grads_reshape + np.eye(self.dim)
                 
                 cell_sol_list_0 = self.unflatten_fn_dof(cells_sol_flat_0)
                 cell_sol_0 = cell_sol_list_0[0]
@@ -220,39 +246,126 @@ class Problem:
                 u_grads_0 = np.sum(u_grads_0, axis=1)  # (num_quads, vec, dim)
                 
                 u_grads_reshape_0 = u_grads_0.reshape(-1, vec, self.dim)  # (num_quads, vec, dim)
-
+                F_0_S = u_grads_reshape_0 + np.eye(self.dim)
+                F_0_S_inv = np.linalg.inv(F_0_S)
+                
+                F_tilde_S = np.einsum('qvd,qde->qve', F_S, F_0_S_inv) ############# matrix mult!! not Dot!!!
+                jacobian_det_S = (np.linalg.det(F_tilde_S))
                 # print(u_grads_reshape)
                 # print(u_grads_reshape_0)
                 u_physics = jax.vmap(tensor_map)(u_grads_reshape, u_grads_reshape_0, *cell_internal_vars).reshape(u_grads.shape)
+                val = np.sum(u_physics[:, None, :, :] * cell_v_grads_JxW, axis=(0, -1))
+                jax.debug.print("jacobian_det: {}", jacobian_det_S)
+                # jax.debug.print("val: {}", val)
             else:
                 u_physics = jax.vmap(tensor_map)(u_grads_reshape, *cell_internal_vars).reshape(u_grads.shape)
+                val = np.sum(u_physics[:, None, :, :] * cell_v_grads_JxW, axis=(0, -1)) 
 
             # (num_quads, vec, dim)
             
             # (num_quads, num_nodes, vec, dim) -> (num_nodes, vec)
-            val = np.sum(u_physics[:, None, :, :] * cell_v_grads_JxW, axis=(0, -1))
+            
             val = jax.flatten_util.ravel_pytree(val)[0] # (num_nodes*vec + ...,)
             return val
         return laplace_kernel
 
     def get_mass_kernel(self, mass_map):
 
-        def mass_kernel(cell_sol_flat, x, cell_JxW, *cell_internal_vars):
+        def mass_kernel(cell_sol_flat, cells_sol_flat_0, cell_shape_grads, cell_v_grads_JxW , x, cell_JxW, *cell_internal_vars):
             # cell_sol_flat: (num_nodes*vec + ...,)
             # cell_sol_list: [(num_nodes, vec), ...]
             # x: (num_quads, dim)
             # cell_JxW: (num_vars, num_quads)
 
-            cell_sol_list = self.unflatten_fn_dof(cell_sol_flat)
-            cell_sol = cell_sol_list[0]
-            cell_JxW = cell_JxW[0]
-            vec = self.fes[0].vec
-            # (1, num_nodes, vec) * (num_quads, num_nodes, 1) -> (num_quads, num_nodes, vec) -> (num_quads, vec)
-            u = np.sum(cell_sol[None, :, :] * self.fes[0].shape_vals[:, :, None], axis=1)
-            u_physics = jax.vmap(mass_map)(u, x, *cell_internal_vars)  # (num_quads, vec)
-            # (num_quads, 1, vec) * (num_quads, num_nodes, 1) * (num_quads, 1, 1) -> (num_nodes, vec)
-            val = np.sum(u_physics[:, None, :] * self.fes[0].shape_vals[:, :, None] * cell_JxW[:, None, None], axis=0)
-            val = jax.flatten_util.ravel_pytree(val)[0] # (num_nodes*vec + ...,)
+            if hasattr(self, 'X_0'):
+                cell_sol_list = self.unflatten_fn_dof(cell_sol_flat)
+                cell_shape_grads = cell_shape_grads[:, :self.fes[0].num_nodes, :]
+                cell_sol = cell_sol_list[0]
+                cell_v_grads_JxW = cell_v_grads_JxW[:, :self.fes[0].num_nodes, :, :]
+                vec = self.fes[0].vec
+                #####################
+                #print("u_grads_reshape.shape:")
+                #print(u_grads_reshape.shape)
+                
+                ####################
+                # (1, num_nodes, vec, 1) * (num_quads, num_nodes, 1, dim) -> (num_quads, num_nodes, vec, dim)
+                u_grads = cell_sol[None, :, :, None] * cell_shape_grads[:, :, None, :]
+                
+
+                u_grads = np.sum(u_grads, axis=1)  # (num_quads, vec, dim)
+                
+                u_grads_reshape = u_grads.reshape(-1, vec, self.dim)  # (num_quads, vec, dim)
+                F_S = u_grads_reshape + np.eye(self.dim)
+                ########
+                
+                cell_sol_list_0 = self.unflatten_fn_dof(cells_sol_flat_0)
+                cell_sol_0 = cell_sol_list_0[0]
+                u_grads_0 = cell_sol_0[None, :, :, None] * cell_shape_grads[:, :, None, :]
+                
+                u_grads_0 = np.sum(u_grads_0, axis=1)  # (num_quads, vec, dim)
+                
+                u_grads_reshape_0 = u_grads_0.reshape(-1, vec, self.dim)  # (num_quads, vec, dim)
+                F_0_S = u_grads_reshape_0 + np.eye(self.dim)
+
+                # jax.debug.print("u_grads_reshape_0: {}", u_grads_reshape_0)
+            
+                det_F0 = np.linalg.det(F_0_S)
+                
+                F_0_S_inv = np.linalg.inv(F_0_S)
+                
+                F_tilde_S = np.einsum('qvd,qde->qve', F_S, F_0_S_inv) ############# matrix mult!! not Dot!!!
+                # jax.debug.print("F_S: {}", F_S)
+                # jax.debug.print("F_tilde_S: {}", F_tilde_S)
+                jacobian_det_S = (np.linalg.det(F_0_S)) #**1.523
+                # jacobian_det_S = np.linalg.det(np.einsum('qvd,qde->qve', F_tilde_S, F_S)) #/ np.linalg.det(F_S) # det(F_tilde * F_0) (per quad point)
+                # jacobian_det_S = np.linalg.det(F_tilde_S) / np.linalg.det(F_S) # det(F_tilde * F_0) (per quad point)
+
+                # jax.debug.print("jacobian_det_S: {}", jacobian_det_S)
+
+                # jax.debug.print("jacobian_det_S: {}", jacobian_det_S)
+                # jax.debug.print("updated_JxW_mean: {}", np.mean(jacobian_det_S))
+                # updated_JxW =  jacobian_det_S + cell_JxW[0]
+                updated_JxW = jacobian_det_S * (cell_JxW[0])
+                # jax.debug.print("original_JxW: {}", cell_JxW[0])
+                # jax.debug.print("updated_JxW: {}", updated_JxW)
+
+                mean_original_JxW = np.mean(cell_JxW[0])  # Should be 0.125
+                mean_updated_JxW = np.mean(updated_JxW)
+                scaling_factor = mean_updated_JxW / mean_original_JxW
+                # jax.debug.print("scaling_factor: {}", scaling_factor)
+
+                cell_sol_list = self.unflatten_fn_dof(cell_sol_flat)
+                cell_sol = cell_sol_list[0]
+                cell_JxW = cell_JxW[0]
+                vec = self.fes[0].vec
+                # (1, num_nodes, vec) * (num_quads, num_nodes, 1) -> (num_quads, num_nodes, vec) -> (num_quads, vec)
+                u = np.sum(cell_sol[None, :, :] * self.fes[0].shape_vals[:, :, None], axis=1)
+                u_physics = jax.vmap(mass_map)(u, x,F_0_S, *cell_internal_vars)  # (num_quads, vec)
+ 
+                # (num_quads, 1, vec) * (num_quads, num_nodes, 1) * (num_quads, 1, 1) -> (num_nodes, vec)
+                # val = np.sum(u_physics[:, None, :] * self.fes[0].shape_vals[:, :, None], axis=0)
+
+                # Integrate using updated JxW
+                val = np.sum(u_physics[:, None, :] * self.fes[0].shape_vals[:, :, None] * updated_JxW[:, None, None], axis=0)
+                val = jax.flatten_util.ravel_pytree(val)[0] # (num_nodes*vec + ...,)
+                ########
+            else:
+
+                cell_sol_list = self.unflatten_fn_dof(cell_sol_flat)
+                cell_sol = cell_sol_list[0]
+                cell_JxW = cell_JxW[0]
+                vec = self.fes[0].vec
+
+                # jax.debug.print("original_JxW: {}", cell_JxW[0])
+                # (1, num_nodes, vec) * (num_quads, num_nodes, 1) -> (num_quads, num_nodes, vec) -> (num_quads, vec)
+                u = np.sum(cell_sol[None, :, :] * self.fes[0].shape_vals[:, :, None], axis=1)
+                u_physics = jax.vmap(mass_map)(u, x, *cell_internal_vars)  # (num_quads, vec)
+                # (num_quads, 1, vec) * (num_quads, num_nodes, 1) * (num_quads, 1, 1) -> (num_nodes, vec)
+                # val = np.sum(u_physics[:, None, :] * self.fes[0].shape_vals[:, :, None], axis=0)
+
+                val = np.sum(u_physics[:, None, :] * self.fes[0].shape_vals[:, :, None] * cell_JxW[:, None, None], axis=0)
+                val = jax.flatten_util.ravel_pytree(val)[0] # (num_nodes*vec + ...,)
+
             return val
 
         return mass_kernel
@@ -298,7 +411,7 @@ class Problem:
                 # Return a zero array with proper shape will be better.
                 if hasattr(self, 'get_mass_map'):
                     mass_kernel = self.get_mass_kernel(self.get_mass_map())
-                    mass_val = mass_kernel(cell_sol_flat, physical_quad_points, cell_JxW, *cell_internal_vars)
+                    mass_val = mass_kernel(cell_sol_flat, cells_sol_flat_0, cell_shape_grads, cell_v_grads_JxW, physical_quad_points, cell_JxW, *cell_internal_vars)
                 else:
                     mass_val = 0.
 
@@ -314,8 +427,11 @@ class Problem:
                         cell_v_grads_JxW, *cell_internal_vars)
                 else:
                     universal_val = 0.
-
-                return laplace_val + mass_val + universal_val
+                
+                if hasattr(self, 'X_0'):
+                    return laplace_val + mass_val + universal_val
+                else:
+                    return laplace_val + mass_val + universal_val
 
 
             def kernel_jac(cell_sol_flat, *args):
@@ -393,8 +509,43 @@ class Problem:
         batch_size = self.num_cells // num_cuts
         input_collection = [cells_sol_flat, cells_sol_flat_0, self.physical_quad_points, self.shape_grads, self.JxW, self.v_grads_JxW, *internal_vars]
 
+        def Jacobian_Cal(cell_sol_flat, cells_sol_flat_0, physical_quad_points, cell_shape_grads, cell_JxW, cell_v_grads_JxW, *cell_internal_vars):
+            cell_sol_list = self.unflatten_fn_dof(cell_sol_flat)
+            cell_shape_grads = cell_shape_grads[:, :self.fes[0].num_nodes, :]
+            cell_sol = cell_sol_list[0]
+            cell_v_grads_JxW = cell_v_grads_JxW[:, :self.fes[0].num_nodes, :, :]
+            vec = self.fes[0].vec
+            #####################
+            #print("u_grads_reshape.shape:")
+            #print(u_grads_reshape.shape)
+            
+            ####################
+            # (1, num_nodes, vec, 1) * (num_quads, num_nodes, 1, dim) -> (num_quads, num_nodes, vec, dim)
+            u_grads = cell_sol[None, :, :, None] * cell_shape_grads[:, :, None, :]
+            
 
-#
+            u_grads = np.sum(u_grads, axis=1)  # (num_quads, vec, dim)
+            
+            u_grads_reshape = u_grads.reshape(-1, vec, self.dim)  # (num_quads, vec, dim)
+            
+
+            F_S = u_grads_reshape + np.eye(self.dim)
+            
+            cell_sol_list_0 = self.unflatten_fn_dof(cells_sol_flat_0)
+            cell_sol_0 = cell_sol_list_0[0]
+            u_grads_0 = cell_sol_0[None, :, :, None] * cell_shape_grads[:, :, None, :]
+            
+            u_grads_0 = np.sum(u_grads_0, axis=1)  # (num_quads, vec, dim)
+            
+            u_grads_reshape_0 = u_grads_0.reshape(-1, vec, self.dim)  # (num_quads, vec, dim)
+            F_0_S = u_grads_reshape_0 + np.eye(self.dim)
+            F_0_S_inv = np.linalg.inv(F_0_S)
+            
+            F_tilde_S = np.einsum('qvd,qde->qve', F_S, F_0_S_inv) ############# matrix mult!! not Dot!!!
+            jacobian_det_S = (np.linalg.det(F_tilde_S))
+            return  jacobian_det_S
+#       
+        Jacobian_Cal = jax.jit(jax.vmap(Jacobian_Cal))
         if jac_flag:
             values = []
             jacs = []
@@ -404,7 +555,13 @@ class Problem:
                 else:
                     input_col = jax.tree_map(lambda x: x[i * batch_size:], input_collection)
 
+                if hasattr(self, 'X_0'):
+                    
+                    Jaco = Jacobian_Cal(*input_col)
+                    jax.debug.print("Jaco: {}", Jaco)
+                
                 val, jac = vmap_fn(*input_col)
+
                 values.append(val)
                 jacs.append(jac)
 

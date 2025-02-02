@@ -58,8 +58,19 @@ class FiniteElement:
     gauss_order: int
     dirichlet_bc_info: Optional[List[Union[List[Callable], List[int], List[Callable]]]]
     periodic_bc_info: Optional[List[Union[List[Callable], List[Callable], List[Callable], List[int]]]] = None
+    # param_flag: Optional[int] = None
 
     def __post_init__(self):
+
+        # if self.param_flag == 10:
+        #     self.points = self.mesh.points
+        #     self.shape_grads, self.JxW = self.get_shape_grads()  # Update shape gradients and Jacobians
+        #     self.v_grads_JxW = self.shape_grads[:, :, :, None, :] * self.JxW[:, :, None, None, None]
+        #     jax.debug.print("Bypas Bypas Bypas Bypas Bypas Bypas Bypas Bypas")
+        #     jax.debug.print("Bypas Bypas Bypas Bypas Bypas Bypas Bypas Bypas")
+        #     jax.debug.print("Bypas Bypas Bypas Bypas Bypas Bypas Bypas Bypas")
+        #     jax.debug.print("Bypas Bypas Bypas Bypas Bypas Bypas Bypas Bypas")
+        # else:
         self.points = self.mesh.points
         self.cells = self.mesh.cells
         self.num_cells = len(self.cells)
@@ -75,6 +86,7 @@ class FiniteElement:
         self.num_quads = self.shape_vals.shape[0]
         self.num_nodes = self.shape_vals.shape[1]
         self.num_faces = self.face_shape_vals.shape[0]
+        self.shapeaces = self.face_shape_vals.shape[0]
         self.shape_grads, self.JxW = self.get_shape_grads()
         self.node_inds_list, self.vec_inds_list, self.vals_list = self.Dirichlet_boundary_conditions(self.dirichlet_bc_info)
         self.p_node_inds_list_A, self.p_node_inds_list_B, self.p_vec_inds_list = self.periodic_boundary_conditions()
@@ -102,7 +114,7 @@ class FiniteElement:
             (num_cells, num_quads)
         """
         assert self.shape_grads_ref.shape == (self.num_quads, self.num_nodes, self.dim)
-        print('Hyunoh')
+        # print('Hyunoh')
         physical_coos = onp.take(self.points, self.cells, axis=0)  # (num_cells, num_nodes, dim)
         # (num_cells, num_quads, num_nodes, dim, dim) -> (num_cells, num_quads, 1, dim, dim)
         
