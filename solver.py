@@ -446,12 +446,16 @@ def solver(problem, solver_options={}):
     def newton_update_helper(dofs):
         sol_list = problem.unflatten_fn_sol_list(dofs)
         res_list = problem.newton_update(sol_list)
+        if res_list == None:
+            return None, []
         res_vec = jax.flatten_util.ravel_pytree(res_list)[0]
         res_vec = apply_bc_vec(res_vec, dofs, problem)
         A_fn = get_A_fn(problem, solver_options)
         return res_vec, A_fn
 
     res_vec, A_fn = newton_update_helper(dofs)
+    if res_vec == None:
+        return None
     res_val = np.linalg.norm(res_vec)
     res_val_initial = res_val
     rel_res_val = res_val/res_val_initial
@@ -459,6 +463,8 @@ def solver(problem, solver_options={}):
     while (rel_res_val > rel_tol) and (res_val > tol):
         dofs = linear_incremental_solver(problem, res_vec, A_fn, dofs, solver_options)
         res_vec, A_fn = newton_update_helper(dofs)
+        if res_vec == None:
+            return None
         # logger.debug(f"DEBUG: l_2 res = {np.linalg.norm(apply_bc_vec(A_fn(dofs), dofs, problem))}")
         # test_jacobi_precond(problem, jacobi_preconditioner(problem, dofs), A_fn)
         res_val = np.linalg.norm(res_vec)

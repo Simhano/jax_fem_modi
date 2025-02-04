@@ -255,7 +255,7 @@ class Problem:
                 # print(u_grads_reshape_0)
                 u_physics = jax.vmap(tensor_map)(u_grads_reshape, u_grads_reshape_0, *cell_internal_vars).reshape(u_grads.shape)
                 val = np.sum(u_physics[:, None, :, :] * cell_v_grads_JxW, axis=(0, -1))
-                jax.debug.print("jacobian_det: {}", jacobian_det_S)
+                # jax.debug.print("jacobian_det: {}", jacobian_det_S)
                 # jax.debug.print("val: {}", val)
             else:
                 u_physics = jax.vmap(tensor_map)(u_grads_reshape, *cell_internal_vars).reshape(u_grads.shape)
@@ -546,9 +546,11 @@ class Problem:
             return  jacobian_det_S
 #       
         Jacobian_Cal = jax.jit(jax.vmap(Jacobian_Cal))
+        
         if jac_flag:
             values = []
             jacs = []
+            Jaco_mins = []
             for i in range(num_cuts):
                 if i < num_cuts - 1:
                     input_col = jax.tree_map(lambda x: x[i * batch_size:(i + 1) * batch_size], input_collection)
@@ -558,8 +560,12 @@ class Problem:
                 if hasattr(self, 'X_0'):
                     
                     Jaco = Jacobian_Cal(*input_col)
-                    jax.debug.print("Jaco: {}", Jaco)
-                
+                    Jaco_min = np.min(Jaco)
+                    # Jaco_mins.append(Jaco_min)
+                    jax.debug.print("Jaco_min: {}", Jaco_min)
+                    if Jaco_min < 0:
+                        return [], []
+
                 val, jac = vmap_fn(*input_col)
 
                 values.append(val)
@@ -567,7 +573,7 @@ class Problem:
 
             values = np_version.vstack(values)
             jacs = np_version.vstack(jacs)
-
+            
             # values = np.vstack(values)
             # jacs = np.vstack(jacs)
 
@@ -686,6 +692,10 @@ class Problem:
 ########################################################################
         # (num_cells, num_nodes*vec + ...),  (num_cells, num_nodes*vec + ..., num_nodes*vec + ...)
         weak_form_flat, cells_jac_flat = self.split_and_compute_cell(cells_sol_flat, onp, True, internal_vars, cells_sol_flat_0)
+
+        if weak_form_flat == []:
+            return None
+        
         self.V = onp.array(cells_jac_flat.reshape(-1))
         # self.V = np.array(cells_jac_flat.reshape(-1))
 
