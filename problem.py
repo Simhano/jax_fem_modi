@@ -542,8 +542,9 @@ class Problem:
             F_0_S_inv = np.linalg.inv(F_0_S)
             
             F_tilde_S = np.einsum('qvd,qde->qve', F_S, F_0_S_inv) ############# matrix mult!! not Dot!!!
-            jacobian_det_S = (np.linalg.det(F_tilde_S))
-            return  jacobian_det_S
+            jacobian_det_tilde_S = (np.linalg.det(F_tilde_S))
+            jacobian_det_0_S = (np.linalg.det(F_0_S))
+            return  jacobian_det_tilde_S, jacobian_det_0_S
 #       
         Jacobian_Cal = jax.jit(jax.vmap(Jacobian_Cal))
         
@@ -559,11 +560,12 @@ class Problem:
 
                 if hasattr(self, 'X_0'):
                     
-                    Jaco = Jacobian_Cal(*input_col)
-                    Jaco_min = np.min(Jaco)
+                    Jaco_tilde, Jaco_0 = Jacobian_Cal(*input_col)
+                    Jaco_tilde_min = np.min(Jaco_tilde)
+                    Jaco_0_min = np.min(Jaco_0)
                     # Jaco_mins.append(Jaco_min)
-                    jax.debug.print("Jaco_min: {}", Jaco_min)
-                    if Jaco_min < 0:
+                    # jax.debug.print("Jaco_min: {}", Jaco_min)
+                    if Jaco_tilde_min < 0 or Jaco_0_min < 0:
                         return [], []
 
                 val, jac = vmap_fn(*input_col)

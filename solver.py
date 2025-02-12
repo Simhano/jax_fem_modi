@@ -38,6 +38,9 @@ def jax_solve(problem, A_fn, b, x0, precond):
     # Verify convergence
     err = np.linalg.norm(A_fn(x) - b)
     logger.debug(f"JAX Solver - Finshed solving, res = {err}")
+    if hasattr(problem, 'X_0'):
+        if err > 0.1:
+            return None
     assert err < 0.1, f"JAX linear solver failed to converge with err = {err}" # 0.1
     x = np.where(err < 0.1, x, np.nan) # For assert purpose, some how this also affects bicgstab.
 
@@ -280,6 +283,10 @@ def linear_incremental_solver(problem, res_vec, A_fn, dofs, solver_options):
         x0 = x0_1 - x0_2
         precond = solver_options['jax_solver']['precond'] if 'precond' in solver_options['jax_solver'] else True
         inc = jax_solve(problem, A_fn, b, x0, precond)
+        if hasattr(problem, 'X_0'):
+            if inc == None:
+                return None
+        
     elif 'umfpack_solver' in solver_options:
         inc = umfpack_solve(A_fn, b)
     else:
@@ -462,6 +469,8 @@ def solver(problem, solver_options={}):
     logger.debug(f"Before, l_2 res = {res_val}, relative l_2 res = {rel_res_val}")
     while (rel_res_val > rel_tol) and (res_val > tol):
         dofs = linear_incremental_solver(problem, res_vec, A_fn, dofs, solver_options)
+        if dofs == None:
+            return None
         res_vec, A_fn = newton_update_helper(dofs)
         if res_vec == None:
             return None
