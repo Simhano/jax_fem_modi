@@ -5,7 +5,7 @@ import jax.flatten_util
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, List, Union
 import functools
-
+import jax.nn
 from jax_fem.utils import timeit 
 from jax_fem.generate_mesh import Mesh
 from jax_fem.fe import FiniteElement
@@ -544,42 +544,133 @@ class Problem:
             F_tilde_S = np.einsum('qvd,qde->qve', F_S, F_0_S_inv) ############# matrix mult!! not Dot!!!
             jacobian_det_tilde_S = (np.linalg.det(F_tilde_S))
             jacobian_det_0_S = (np.linalg.det(F_0_S))
-            return  jacobian_det_tilde_S, jacobian_det_0_S
+            # jax.debug.print("F_tilde_S: {}", F_tilde_S.shape)
+            return  jacobian_det_tilde_S, jacobian_det_0_S, F_S, F_0_S, F_tilde_S
 #       
         Jacobian_Cal = jax.jit(jax.vmap(Jacobian_Cal))
-        
+
+
+
+        def jacobian_penalty(Jaco_tilde_all, Jaco_0_all, threshold=0.5, percentile=1, penalty_weight=1e3, scale=0.05):
+            # For Jaco_tilde_all: select the worst percentile cells
+            n_tilde = Jaco_tilde_all.shape[0]
+            n_worst_tilde = int(np.ceil(percentile * n_tilde))
+            worst_tilde = np.sort(Jaco_tilde_all)[:n_worst_tilde]
+            # Compute the shortfall for each cell (only positive values matter)
+            shortfall_tilde = jax.nn.relu(threshold - worst_tilde)
+            # Apply an exponential penalty: if shortfall is zero, penalty is zero; otherwise, it increases rapidly.
+            # penalty_tilde = np.where(shortfall_tilde > 0, np.exp(shortfall_tilde / scale) - 1, 0)
+            penalty_tilde = np.where(shortfall_tilde > 0, shortfall_tilde, 0)
+            
+            # For Jaco_0_all: do the same
+            n_0 = Jaco_0_all.shape[0]
+            n_worst_0 = int(np.ceil(percentile * n_0))
+            worst_0 = np.sort(Jaco_0_all)[:n_worst_0]
+            shortfall_0 = jax.nn.relu(threshold - worst_0)
+            # penalty_0 = np.where(shortfall_0 > 0, np.exp(shortfall_0 / scale) - 1, 0)
+            penalty_0 = np.where(shortfall_0 > 0, shortfall_0, 0)
+
+            # Combine the penalties (average the penalties from each array and scale)
+            total_penalty = penalty_weight * (np.mean(penalty_tilde) + np.mean(penalty_0))
+            
+            # Count the total number of cells (from both arrays) that violate the threshold.
+            J_all = np.concatenate([Jaco_tilde_all, Jaco_0_all])
+            violating_mask = J_all < threshold
+            count = np.sum(violating_mask)
+            jax.debug.print("num of violating cells: {}", count)
+            
+            # If no cell violates the threshold, return zero penalty.
+            # total_penalty = np.where(count > 0, total_penalty, 0.0)
+            return total_penalty
+
+
         if jac_flag:
             values = []
             jacs = []
-            Jaco_mins = []
+            # Jaco_mins = []
+            # Jaco_tilde_array = []
+            # Jaco_0_array = []
+            # F_S_array = []
+            # F_0_S_array = []
+            # F_tilde_S_array = []
+
             for i in range(num_cuts):
                 if i < num_cuts - 1:
                     input_col = jax.tree_map(lambda x: x[i * batch_size:(i + 1) * batch_size], input_collection)
                 else:
                     input_col = jax.tree_map(lambda x: x[i * batch_size:], input_collection)
 
-                if hasattr(self, 'X_0'):
-                    
-                    Jaco_tilde, Jaco_0 = Jacobian_Cal(*input_col)
-                    Jaco_tilde_min = np.min(Jaco_tilde)
-                    Jaco_0_min = np.min(Jaco_0)
-                    # Jaco_mins.append(Jaco_min)
-                    # jax.debug.print("Jaco_min: {}", Jaco_min)
-                    if Jaco_tilde_min < 0 or Jaco_0_min < 0:
-                        return [], []
+                # if hasattr(self, 'X_0'):
+                #     Jaco_tilde, Jaco_0, F_S, F_0_S, F_tilde_S = Jacobian_Cal(*input_col)
+                #     Jaco_tilde_array.append(Jaco_tilde)
+                #     Jaco_0_array.append(Jaco_0)
+                #     F_S_array.append(F_S)
+                #     F_0_S_array.append(F_0_S)
+                #     F_tilde_S_array.append(F_tilde_S)
+
+
 
                 val, jac = vmap_fn(*input_col)
 
                 values.append(val)
                 jacs.append(jac)
 
+
+            # if hasattr(self, 'X_0'):
+            #     values = onp.vstack(values)
+            #     jacs = onp.vstack(jacs)
+            # else:
             values = np_version.vstack(values)
             jacs = np_version.vstack(jacs)
-            
+
+            ##################################### Jacobian Cal to Stop ###########################################
+            ##################################### Jacobian Cal to Stop ###########################################
+            ##################################### Jacobian Cal to Stop ###########################################
+            if hasattr(self, 'X_0'):
+
+                # # These are now fully concatenated arrays
+                # Jaco_tilde_all = np.concatenate(Jaco_tilde_array)
+                # Jaco_0_all = np.concatenate(Jaco_0_array)
+                # F_tilde_S_all = np.concatenate(F_tilde_S_array, axis=0)
+                # F_tilde_S_all = np.squeeze(F_tilde_S_all, axis=1) 
+
+                # F_S_all = np.concatenate(F_S_array, axis=0)
+                # F_S_all = np.squeeze(F_S_all, axis=1) 
+
+                # C_tilde = np.einsum("eji,ejk->eik", F_tilde_S_all, F_tilde_S_all)
+
+
+                # # Trace(C) across the last two dims => shape (num_elems,)
+                # trace_C_tilde = np.trace(C_tilde, axis1=1, axis2=2)
+                # eps_v = 0.5 * (trace_C_tilde - 3.0)
+                # eps_v_sq = eps_v ** 2
+                # strain_squre_mean = np.mean(eps_v_sq)
+                # jax.debug.print("strain_squre_mean: {}", strain_squre_mean)
+
+                # mean_tilde = np.mean(Jaco_tilde_all)
+                # mean_0 = np.mean(Jaco_0_all)
+                # min_tilde = np.min(Jaco_tilde_all)
+                # min_0 = np.min(Jaco_0_all)
+                # max_tilde = np.max(Jaco_tilde_all)
+                # max_0 = np.max(Jaco_0_all)
+                # # Jaco_mean = (mean_tilde+ mean_0) / 2.0
+
+
+                # penalty output
+                # Jaco_mean = strain_squre_mean
+                Jaco_mean = 0
+            ##################################### Jacobian Cal to Stop ###########################################
+            ##################################### Jacobian Cal to Stop ###########################################
+            ##################################### Jacobian Cal to Stop ###########################################
+
+
             # values = np.vstack(values)
             # jacs = np.vstack(jacs)
-
-            return values, jacs
+            
+            if hasattr(self, 'X_0'):
+                return values, jacs, Jaco_mean
+            else:
+                return values, jacs
         else:
             values = []
             for i in range(num_cuts):
@@ -602,8 +693,13 @@ class Problem:
             for i, boundary_inds in enumerate(self.boundary_inds_list):
                 vmap_fn = self.kernel_jac_face[i]
                 selected_cell_sols_flat = cells_sol_flat[boundary_inds[:, 0]]  # (num_selected_faces, num_nodes*vec + ...))
-                input_collection = [selected_cell_sols_flat, self.physical_surface_quad_points[i], self.selected_face_shape_vals[i], 
-                                    self.selected_face_shape_grads[i], self.nanson_scale[i], *internal_vars_surfaces[i]]
+
+                if hasattr(self, 'internal_vars_surfaces'):
+                    input_collection = [selected_cell_sols_flat, self.physical_surface_quad_points[i], self.selected_face_shape_vals[i], 
+                                        self.selected_face_shape_grads[i], self.nanson_scale[i], self.internal_vars_surfaces[i]]
+                else:
+                    input_collection = [selected_cell_sols_flat, self.physical_surface_quad_points[i], self.selected_face_shape_vals[i], 
+                                        self.selected_face_shape_grads[i], self.nanson_scale[i], *internal_vars_surfaces[i]]
 
                 val, jac = vmap_fn(*input_collection)
                 values.append(val)
@@ -615,8 +711,12 @@ class Problem:
                 vmap_fn = self.kernel_face[i]
                 selected_cell_sols_flat = cells_sol_flat[boundary_inds[:, 0]]  # (num_selected_faces, num_nodes*vec + ...))
                 # TODO: duplicated code
-                input_collection = [selected_cell_sols_flat, self.physical_surface_quad_points[i], self.selected_face_shape_vals[i], 
-                                    self.selected_face_shape_grads[i], self.nanson_scale[i], *internal_vars_surfaces[i]]
+                if hasattr(self, 'internal_vars_surfaces'):
+                    input_collection = [selected_cell_sols_flat, self.physical_surface_quad_points[i], self.selected_face_shape_vals[i], 
+                                        self.selected_face_shape_grads[i], self.nanson_scale[i], self.internal_vars_surfaces[i]]
+                else:
+                    input_collection = [selected_cell_sols_flat, self.physical_surface_quad_points[i], self.selected_face_shape_vals[i], 
+                                        self.selected_face_shape_grads[i], self.nanson_scale[i], *internal_vars_surfaces[i]]
                 val = vmap_fn(*input_collection)
                 values.append(val)
             return values
@@ -693,10 +793,13 @@ class Problem:
             cells_sol_flat_0 = cells_sol_flat
 ########################################################################
         # (num_cells, num_nodes*vec + ...),  (num_cells, num_nodes*vec + ..., num_nodes*vec + ...)
-        weak_form_flat, cells_jac_flat = self.split_and_compute_cell(cells_sol_flat, onp, True, internal_vars, cells_sol_flat_0)
+        if hasattr(self, 'X_0'):
+            weak_form_flat, cells_jac_flat, Jaco_mean = self.split_and_compute_cell(cells_sol_flat, onp, True, internal_vars, cells_sol_flat_0)
+        else:
+            weak_form_flat, cells_jac_flat = self.split_and_compute_cell(cells_sol_flat, onp, True, internal_vars, cells_sol_flat_0)
 
-        if weak_form_flat == []:
-            return None
+        # if weak_form_flat == []:
+        #     return None
         
         self.V = onp.array(cells_jac_flat.reshape(-1))
         # self.V = np.array(cells_jac_flat.reshape(-1))
@@ -707,14 +810,21 @@ class Problem:
             self.V = onp.hstack((self.V, onp.array(cells_jac_f_flat.reshape(-1))))
             # self.V = np.hstack((self.V, np.array(cells_jac_f_flat.reshape(-1))))
 
-        return self.compute_residual_vars_helper(weak_form_flat, weak_form_face_flat)
+        if hasattr(self, 'X_0'):
+            return self.compute_residual_vars_helper(weak_form_flat, weak_form_face_flat), Jaco_mean
+        else:
+            return self.compute_residual_vars_helper(weak_form_flat, weak_form_face_flat)
 
     def compute_residual(self, sol_list):
         return self.compute_residual_vars(sol_list, self.internal_vars, self.internal_vars_surfaces)
 
     def newton_update(self, sol_list):
         return self.compute_newton_vars(sol_list, self.internal_vars, self.internal_vars_surfaces)
-
+        # if hasattr(self, 'X_0'):
+        #     return self.compute_newton_vars(sol_list, self.internal_vars, self.internal_vars_surfaces)
+        # else:
+        #     return self.compute_newton_vars(sol_list, self.internal_vars, self.internal_vars_surfaces)
+        
     def set_params(self, params):
         """Used for solving inverse problems.
         """

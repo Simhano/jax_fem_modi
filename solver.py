@@ -38,9 +38,9 @@ def jax_solve(problem, A_fn, b, x0, precond):
     # Verify convergence
     err = np.linalg.norm(A_fn(x) - b)
     logger.debug(f"JAX Solver - Finshed solving, res = {err}")
-    if hasattr(problem, 'X_0'):
-        if err > 0.1:
-            return None
+    # if hasattr(problem, 'X_0'):
+    #     if err > 0.1:
+    #         return None
     assert err < 0.1, f"JAX linear solver failed to converge with err = {err}" # 0.1
     x = np.where(err < 0.1, x, np.nan) # For assert purpose, some how this also affects bicgstab.
 
@@ -283,9 +283,9 @@ def linear_incremental_solver(problem, res_vec, A_fn, dofs, solver_options):
         x0 = x0_1 - x0_2
         precond = solver_options['jax_solver']['precond'] if 'precond' in solver_options['jax_solver'] else True
         inc = jax_solve(problem, A_fn, b, x0, precond)
-        if hasattr(problem, 'X_0'):
-            if inc == None:
-                return None
+        # if hasattr(problem, 'X_0'):
+        #     if inc == None:
+        #         return None
         
     elif 'umfpack_solver' in solver_options:
         inc = umfpack_solve(A_fn, b)
@@ -452,28 +452,44 @@ def solver(problem, solver_options={}):
 
     def newton_update_helper(dofs):
         sol_list = problem.unflatten_fn_sol_list(dofs)
-        res_list = problem.newton_update(sol_list)
-        if res_list == None:
-            return None, []
+        if hasattr(problem, 'X_0'):
+            res_list, Jaco_mean = problem.newton_update(sol_list)
+        else:
+            res_list= problem.newton_update(sol_list)
+        # if res_list == None:
+        #     return None, []
         res_vec = jax.flatten_util.ravel_pytree(res_list)[0]
         res_vec = apply_bc_vec(res_vec, dofs, problem)
         A_fn = get_A_fn(problem, solver_options)
-        return res_vec, A_fn
 
-    res_vec, A_fn = newton_update_helper(dofs)
-    if res_vec == None:
-        return None
+        if hasattr(problem, 'X_0'):
+            return res_vec, A_fn, Jaco_mean
+        else:
+            return res_vec, A_fn
+
+
+    if hasattr(problem, 'X_0'):
+        res_vec, A_fn, Jaco_mean = newton_update_helper(dofs)
+    else:
+        res_vec, A_fn = newton_update_helper(dofs)
+
+
+    # if res_vec == None:
+    #     return None
     res_val = np.linalg.norm(res_vec)
     res_val_initial = res_val
     rel_res_val = res_val/res_val_initial
     logger.debug(f"Before, l_2 res = {res_val}, relative l_2 res = {rel_res_val}")
     while (rel_res_val > rel_tol) and (res_val > tol):
         dofs = linear_incremental_solver(problem, res_vec, A_fn, dofs, solver_options)
-        if dofs == None:
-            return None
-        res_vec, A_fn = newton_update_helper(dofs)
-        if res_vec == None:
-            return None
+        # if dofs == None:
+        #     return None
+        if hasattr(problem, 'X_0'):
+            res_vec, A_fn, Jaco_mean = newton_update_helper(dofs)
+        else:
+            res_vec, A_fn = newton_update_helper(dofs)
+        # if res_vec == None:
+        #     return None
         # logger.debug(f"DEBUG: l_2 res = {np.linalg.norm(apply_bc_vec(A_fn(dofs), dofs, problem))}")
         # test_jacobi_precond(problem, jacobi_preconditioner(problem, dofs), A_fn)
         res_val = np.linalg.norm(res_vec)
@@ -507,7 +523,12 @@ def solver(problem, solver_options={}):
     del dofs
     del res_vec
     gc.collect()
-    return sol_list
+
+    if hasattr(problem, 'X_0'):
+    # Safe, outside of JIT
+        return sol_list, Jaco_mean
+    else:
+        return sol_list, np.array(0.0)
 
 
 ################################################################################
@@ -742,7 +763,7 @@ def implicit_vjp(problem, sol_list, params, v_list, adjoint_solver_options):
         return vjp_linear_fn
 
     problem.set_params(params)
-    problem.newton_update(sol_list)
+    _, _ = problem.newton_update(sol_list)
 
     A_fn = get_A_fn(problem, adjoint_solver_options)
     v_vec = jax.flatten_util.ravel_pytree(v_list)[0]
@@ -783,22 +804,117 @@ def implicit_vjp(problem, sol_list, params, v_list, adjoint_solver_options):
     return vjp_result
 
 
+
 def ad_wrapper(problem, solver_options={}, adjoint_solver_options={}):
     @jax.custom_vjp
     def fwd_pred(params):
         problem.set_params(params)
-        sol_list = solver(problem, solver_options)
-        return sol_list
+        sol_list, Jaco_mean = solver(problem, solver_options)
+        # return sol_list, Jaco_mean
+        return sol_list, Jaco_mean
+
 
     def f_fwd(params):
-        sol_list = fwd_pred(params)
-        return sol_list, (params, sol_list)
+        sol_list, Jaco_mean = fwd_pred(params)
+        return (sol_list, Jaco_mean), (params, sol_list, Jaco_mean)
 
     def f_bwd(res, v):
         logger.info("Running backward and solving the adjoint problem...")
-        params, sol_list = res
+        # params, sol_list, Jaco_mean = res
+        params, sol_list, _ = res  # ignore Jaco_mean
+
+        if isinstance(v, tuple):
+            v = v[0]  # Use only the part corresponding to sol_list
+
         vjp_result = implicit_vjp(problem, sol_list, params, v, adjoint_solver_options)
         return (vjp_result, )
 
     fwd_pred.defvjp(f_fwd, f_bwd)
     return fwd_pred
+
+
+
+
+# def ad_wrapper(problem, solver_options={}, adjoint_solver_options={}):
+    # def penalty_only_fn(p):
+    #     problem.set_params(p)
+    #     # solver returns (sol_list, penalty)
+    #     _, penalty = solver(problem, solver_options)
+    #     return penalty
+
+    # @jax.custom_vjp
+    # def fwd_pred(params):
+    #     problem.set_params(params)
+    #     sol_list, penalty = solver(problem, solver_options)
+
+    #     pen_grad = jax.grad(penalty_only_fn)(params)
+    #     # return sol_list, Jaco_mean
+    #     return (sol_list, penalty), (params, sol_list, penalty, pen_grad)
+
+
+    # def f_fwd(params):
+    #     (sol_list, penalty), residuals = fwd_pred(params)
+    #     return (sol_list, penalty), residuals
+
+    # def f_bwd(residuals, v):
+    #     logger.info("Running backward and solving the adjoint problem...")
+    #     # Unpack residuals: we now have the stored penalty gradient.
+    #     params, sol_list, penalty, pen_grad = residuals
+    #     # Unpack the incoming tangent (adjoint) for (sol_list, penalty)
+    #     if not isinstance(v, tuple):
+    #         v = (v, 0.0)
+    #     v_sol, v_pen = v
+
+    #     # Compute the gradient contribution from the solution output.
+    #     sol_grad = implicit_vjp(problem, sol_list, params, v_sol, adjoint_solver_options)
+    #     # Use the stored penalty sensitivity to scale by v_pen.
+    #     total_grad = sol_grad + pen_grad * v_pen
+    #     return (total_grad,)
+
+    # fwd_pred.defvjp(f_fwd, f_bwd)
+    # return fwd_pred
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    # def ad_wrapper(problem, solver_options={}, adjoint_solver_options={}):
+    # @jax.custom_vjp
+    # def fwd_pred(params):
+    #     problem.set_params(params)
+    #     sol_list, Jaco_mean = solver(problem, solver_options)
+    #     # return sol_list, Jaco_mean
+    #     return sol_list, Jaco_mean
+
+
+    # def f_fwd(params):
+    #     sol_list, Jaco_mean = fwd_pred(params)
+    #     return (sol_list, Jaco_mean), (params, sol_list, Jaco_mean)
+
+    # def f_bwd(res, v):
+    #     logger.info("Running backward and solving the adjoint problem...")
+    #     # params, sol_list, Jaco_mean = res
+    #     params, sol_list, _ = res  # ignore Jaco_mean
+
+    #     if isinstance(v, tuple):
+    #         v = v[0]  # Use only the part corresponding to sol_list
+
+    #     vjp_result = implicit_vjp(problem, sol_list, params, v, adjoint_solver_options)
+    #     return (vjp_result, )
+
+    # fwd_pred.defvjp(f_fwd, f_bwd)
+    # return fwd_pred
